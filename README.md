@@ -40,6 +40,7 @@ Keep in mind to enable the correct Docker engine on Windows host systems to matc
 
 The pre-configured Testcontainers below are supported. Further examples can be found in [TestcontainersContainerTest][1] as well as in [database][2] or [message broker][3] tests.
 
+- Couchbase (couchbase:6.5.1)
 - CouchDB (couchdb:2.3.1)
 - MsSql (server:2017-CU14-ubuntu)
 - MySql (mysql:8.0.18)
@@ -56,9 +57,9 @@ var testcontainersBuilder = new TestcontainersBuilder<TestcontainersContainer>()
   .WithImage("nginx")
   .WithName("nginx")
   .WithPortBinding(80)
-  .WithWaitStrategy(Wait.UntilPortsAreAvailable(80));
+  .WithWaitStrategy(Wait.ForUnixContainer().UntilPortIsAvailable(80));
 
-using (var testcontainer = testcontainersBuilder.Build())
+await using (var testcontainer = testcontainersBuilder.Build())
 {
   await testcontainer.StartAsync();
   var request = WebRequest.Create("http://localhost:80");
@@ -72,10 +73,10 @@ var testcontainersBuilder = new TestcontainersBuilder<TestcontainersContainer>()
   .WithImage("nginx")
   .WithName("nginx")
   .WithMount(".", "/tmp")
-  .WithWaitStrategy(Wait.UntilFilesExists("/tmp/hostname"))
-  .WithCommand("/bin/bash", "-c", "hostname > /tmp/hostname");
+  .WithCommand("/bin/bash", "-c", "hostname > /tmp/hostname")
+  .WithWaitStrategy(Wait.ForUnixContainer().UntilFileExists("/tmp/hostname"));
 
-using (var testcontainer = testcontainersBuilder.Build())
+await using (var testcontainer = testcontainersBuilder.Build())
 {
   await testcontainer.StartAsync();
 }
@@ -92,7 +93,7 @@ var testcontainersBuilder = new TestcontainersBuilder<PostgreSqlTestcontainer>()
     Password = "postgres",
   });
 
-using (var testcontainer = testcontainersBuilder.Build())
+await using (var testcontainer = testcontainersBuilder.Build())
 {
   await testcontainer.StartAsync();
 
@@ -106,6 +107,39 @@ using (var testcontainer = testcontainersBuilder.Build())
       cmd.CommandText = "SELECT 1";
       cmd.ExecuteReader();
     }
+  }
+}
+```
+
+The implementation of the pre-configured wait strategies can be chained together to support individual requirements for Testcontainers with different container platform operating systems.
+
+```csharp
+Wait.ForUnixContainer()
+  .UntilPortIsAvailable(80)
+  .UntilFileExists("/tmp/foo")
+  .UntilFileExists("/tmp/bar")
+  .UntilOperationIsSucceeded(() => true, 1);
+```
+
+## Logging
+
+To enable and configure logging, choose your Serilog Sink, like `Serilog.Sinks.File` and add the Sink configuration to the section `Serilog` in your `appsettings.json` file:
+
+```json
+{
+  "Serilog": {
+    "MinimumLevel": "Information",
+    "Using": [
+      "Serilog.Sinks.File"
+    ],
+    "WriteTo": [
+      {
+        "Name": "File",
+        "Args": {
+          "Path": "testcontainers.log"
+        }
+      }
+    ]
   }
 }
 ```

@@ -4,6 +4,7 @@ namespace DotNet.Testcontainers.Tests.Unit.Images
   using System.Collections.Generic;
   using System.IO;
   using System.Threading.Tasks;
+  using DotNet.Testcontainers.Images;
   using DotNet.Testcontainers.Images.Archives;
   using DotNet.Testcontainers.Images.Builders;
   using ICSharpCode.SharpZipLib.Tar;
@@ -15,11 +16,11 @@ namespace DotNet.Testcontainers.Tests.Unit.Images
     public void DockerfileArchiveTar()
     {
       // Given
-      var expected = new List<string> { "Dockerfile", "setup", "setup/setup.sh" };
+      var expected = new SortedSet<string> { "Dockerfile", "setup/setup.sh" };
 
-      var actual = new List<string>();
+      var actual = new SortedSet<string>();
 
-      var dockerFileArchive = new DockerfileArchive("./Assets");
+      var dockerFileArchive = new DockerfileArchive("Assets", "Dockerfile", new DockerImage("Testcontainers", "Test", "1.0.0"));
 
       // When
       using (var tarOut = new FileInfo(dockerFileArchive.Tar()).OpenRead())
@@ -68,15 +69,19 @@ namespace DotNet.Testcontainers.Tests.Unit.Images
     public async Task SimpleDockerfile()
     {
       // Given
-      var imageFromDockerfile = await new ImageFromDockerfileBuilder()
+      var imageFromDockerfileBuilder = new ImageFromDockerfileBuilder()
         .WithName("alpine:custom")
         .WithDockerfileDirectory("Assets")
-        .WithDeleteIfExists(true)
-        .Build();
+        .WithDeleteIfExists(true);
 
       // When
+      var imageFromDockerfile1 = await imageFromDockerfileBuilder.Build();
+      var imageFromDockerfile2 = await imageFromDockerfileBuilder.Build(); // Deletes the previously created image.
+
       // Then
-      Assert.NotEmpty(imageFromDockerfile);
+      Assert.NotEmpty(imageFromDockerfile1);
+      Assert.NotEmpty(imageFromDockerfile2);
+      Assert.Equal(imageFromDockerfile1, imageFromDockerfile2);
     }
   }
 }

@@ -3,9 +3,19 @@ namespace DotNet.Testcontainers.Containers.Configurations.Databases
   using DotNet.Testcontainers.Containers.Configurations.Abstractions;
   using DotNet.Testcontainers.Containers.WaitStrategies;
 
-  public sealed class PostgreSqlTestcontainerConfiguration : TestcontainerDatabaseConfiguration
+  public class PostgreSqlTestcontainerConfiguration : TestcontainerDatabaseConfiguration
   {
-    public PostgreSqlTestcontainerConfiguration() : base("postgres:11.5", 5432)
+    private const string PostgreSqlImage = "postgres:11.5";
+
+    private const int PostgreSqlPort = 5432;
+
+    public PostgreSqlTestcontainerConfiguration()
+      : this(PostgreSqlImage)
+    {
+    }
+
+    public PostgreSqlTestcontainerConfiguration(string image)
+      : base(image, PostgreSqlPort)
     {
     }
 
@@ -27,6 +37,7 @@ namespace DotNet.Testcontainers.Containers.Configurations.Databases
       set => this.Environments["POSTGRES_PASSWORD"] = value;
     }
 
-    public override IWaitUntil WaitStrategy => new WaitUntilShellCommandsAreCompleted($"pg_isready -h '{this.Hostname}' -p '{this.DefaultPort}'");
+    public override IWaitForContainerOS WaitStrategy => Wait.ForUnixContainer()
+      .UntilCommandIsCompleted($"pg_isready -h 'localhost' -p '{this.DefaultPort}'");
   }
 }

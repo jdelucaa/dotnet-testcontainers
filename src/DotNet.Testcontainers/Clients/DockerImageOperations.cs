@@ -34,20 +34,7 @@ namespace DotNet.Testcontainers.Clients
 
     public async Task<ImagesListResponse> ByPropertyAsync(string property, string value, CancellationToken ct = default)
     {
-      var response = this.Docker.Images.ListImagesAsync(new ImagesListParameters
-      {
-        All = true,
-        Filters = new Dictionary<string, IDictionary<string, bool>>
-        {
-          {
-            property, new Dictionary<string, bool>
-            {
-              { value, true },
-            }
-          },
-        },
-      }, ct);
-
+      var response = this.Docker.Images.ListImagesAsync(new ImagesListParameters { All = true, Filters = new FilterByProperty(property, value) }, ct);
       return (await response).FirstOrDefault();
     }
 
@@ -63,7 +50,7 @@ namespace DotNet.Testcontainers.Clients
 
     public Task CreateAsync(IDockerImage image, CancellationToken ct = default)
     {
-      return this.Docker.Images.CreateImageAsync(new ImagesCreateParameters { FromImage = image.FullName }, null, DebugProgress.Provider, ct);
+      return this.Docker.Images.CreateImageAsync(new ImagesCreateParameters { FromImage = image.FullName }, null, new TraceProgress(), ct);
     }
 
     public Task DeleteAsync(IDockerImage image, CancellationToken ct = default)
@@ -73,7 +60,7 @@ namespace DotNet.Testcontainers.Clients
 
     public async Task<string> BuildAsync(IImageFromDockerfileConfiguration config, CancellationToken ct = default)
     {
-      var dockerFileArchive = new DockerfileArchive(config.DockerfileDirectory);
+      var dockerFileArchive = new DockerfileArchive(config.DockerfileDirectory, config.Dockerfile, config.Image);
 
       var imageExists = await this.ExistsWithNameAsync(config.Image.FullName, ct);
 
@@ -84,9 +71,10 @@ namespace DotNet.Testcontainers.Clients
 
       using (var stream = new FileStream(dockerFileArchive.Tar(), FileMode.Open))
       {
-        using (var unused = await this.Docker.Images.BuildImageFromDockerfileAsync(stream, new ImageBuildParameters { Dockerfile = config.Dockerfile, Tags = new[] { config.Image.FullName } }, ct))
+        using (var image = await this.Docker.Images.BuildImageFromDockerfileAsync(stream, new ImageBuildParameters { Dockerfile = config.Dockerfile, Tags = new[] { config.Image.FullName } }, ct))
         {
-          // New Docker image built, ready to use.
+          // Read the image stream to the end, to avoid disposing before Docker has done it's job.
+          _ = await new StreamReader(image).ReadToEndAsync();
         }
       }
 

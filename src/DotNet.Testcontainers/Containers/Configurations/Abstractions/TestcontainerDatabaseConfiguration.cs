@@ -11,6 +11,10 @@ namespace DotNet.Testcontainers.Containers.Configurations.Abstractions
     {
     }
 
+    protected TestcontainerDatabaseConfiguration(string image, int defaultPort, int port) : base(image, defaultPort, port)
+    {
+    }
+
     public virtual string Database { get; set; }
   }
 }

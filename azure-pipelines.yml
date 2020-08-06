@@ -3,8 +3,10 @@ name: $(date:yyyyMMdd)$(rev:.r)
 variables:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
-  dotNetCoreVersion: 2.2.401
-  cakeVersion: 0.35.0
+  MSBUILDDISABLENODEREUSE: true # https://github.com/dotnet/sdk/issues/9452
+  TZ: CET # https://stackoverflow.com/q/53510011
+  dotNetCoreVersion: 3.1.106
+  cakeVersion: 0.38.4
 
 trigger:
   - master
@@ -18,32 +20,30 @@ pr:
 
 jobs:
   # Run Windows build and tests.
-  - template: template/build.yml
+  - template: .azuredevops/build.yml
     parameters:
-      name: BuildAndTestOnWindows
+      name: BuildAndTestsOnWindows
       displayName: Windows
       vmImage: windows-2019
       dotNetCoreVersion: $(dotNetCoreVersion)
       cakeVersion: $(cakeVersion)
-      testFilter: FullyQualifiedName~DotNet.Testcontainers.Tests.Unit.Windows
+      testFilter: FullyQualifiedName~DotNet.Testcontainers.Tests.Unit.Containers.Windows
 
-  # Run Linux build and tests.
-  - template: template/build.yml
+  # Run Unix build and tests.
+  - template: .azuredevops/build.yml
     parameters:
-      name: BuildAndTestOnLinux
-      displayName: Linux
-      vmImage: ubuntu-16.04
+      name: BuildAndTestsOnUnix
+      displayName: Unix
+      vmImage: ubuntu-18.04
       dotNetCoreVersion: $(dotNetCoreVersion)
       cakeVersion: $(cakeVersion)
       testFilter: FullyQualifiedName~DotNet.Testcontainers
 
   # Run static code analysis and publish artifact.
-  # Until now, we do not cover Windows only tests.
-  - ${{ if in(variables['Build.SourceBranch'], 'refs/heads/master', 'refs/heads/develop') }}:
-    - template: template/publish.yml
-      parameters:
-        name: Release
-        displayName: Release
-        vmImage: ubuntu-16.04
-        dotNetCoreVersion: $(dotNetCoreVersion)
-        cakeVersion: $(cakeVersion)
+  - template: .azuredevops/publish.yml
+    parameters:
+      name: Release
+      displayName: Release
+      vmImage: ubuntu-18.04
+      dotNetCoreVersion: $(dotNetCoreVersion)
+      cakeVersion: $(cakeVersion)

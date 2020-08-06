@@ -2,8 +2,10 @@ namespace DotNet.Testcontainers.Tests.Unit.Containers.Windows
 {
   using System.Threading.Tasks;
   using DotNet.Testcontainers.Clients;
+  using DotNet.Testcontainers.Containers;
   using DotNet.Testcontainers.Containers.Builders;
   using DotNet.Testcontainers.Containers.Modules;
+  using DotNet.Testcontainers.Containers.WaitStrategies;
   using Xunit;
 
   public static class TestcontainersContainerTest
@@ -17,15 +19,34 @@ namespace DotNet.Testcontainers.Tests.Unit.Containers.Windows
       }
 
       [IgnoreOnLinuxEngine]
-      public async Task Disposable()
+      public async Task UntilCommandIsCompleted()
       {
-        // Given
         var testcontainersBuilder = new TestcontainersBuilder<TestcontainersContainer>()
-          .WithImage("mcr.microsoft.com/windows/nanoserver:1809");
+          .WithImage("mcr.microsoft.com/windows/servercore:1809")
+          .WithEntrypoint("PowerShell", "-Command", "Start-Sleep -Seconds 3600")
+          .WithWaitStrategy(Wait.ForWindowsContainer()
+            .UntilCommandIsCompleted("exit !(Test-Path -Path 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')"));
 
         // When
         // Then
-        using (var testcontainer = testcontainersBuilder.Build())
+        await using (IDockerContainer testcontainer = testcontainersBuilder.Build())
+        {
+          await testcontainer.StartAsync();
+        }
+      }
+
+      [IgnoreOnLinuxEngine]
+      public async Task UntilPortIsAvailable()
+      {
+        var testcontainersBuilder = new TestcontainersBuilder<TestcontainersContainer>()
+          .WithImage("mcr.microsoft.com/windows/servercore:1809")
+          .WithEntrypoint("PowerShell", "-Command", "$tcpListener = [System.Net.Sockets.TcpListener]1337; $tcpListener.Start(); Start-Sleep -Seconds 3600")
+          .WithWaitStrategy(Wait.ForWindowsContainer()
+            .UntilPortIsAvailable(1337));
+
+        // When
+        // Then
+        await using (IDockerContainer testcontainer = testcontainersBuilder.Build())
         {
           await testcontainer.StartAsync();
         }

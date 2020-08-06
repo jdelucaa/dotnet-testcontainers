@@ -3,6 +3,7 @@ namespace DotNet.Testcontainers.Clients
   using System;
   using System.Collections.Generic;
   using System.Diagnostics;
+  using System.IO;
   using System.Threading;
   using System.Threading.Tasks;
   using Docker.DotNet.Models;
@@ -14,6 +15,8 @@ namespace DotNet.Testcontainers.Clients
 
   internal sealed class TestcontainersClient : ITestcontainersClient
   {
+    private readonly string osRootDirectory = Path.GetPathRoot(typeof(ITestcontainersClient).Assembly.Location);
+
     private readonly Uri endpoint;
 
     private readonly TestcontainersRegistryService registryService;
@@ -54,16 +57,18 @@ namespace DotNet.Testcontainers.Clients
       Console.CancelKeyPress += (sender, args) => this.PurgeOrphanedContainers();
     }
 
-    private void PurgeOrphanedContainers()
+    public bool IsRunningInsideDocker
     {
-      var args = new PurgeOrphanedContainersArgs(this.endpoint, this.registryService.GetRegisteredContainers());
-      new Process { StartInfo = { FileName = "docker", Arguments = args.ToString() } }.Start();
+      get
+      {
+        return File.Exists(Path.Combine(this.osRootDirectory, ".dockerenv"));
+      }
     }
 
-    public async Task<bool> GetIsWindowsEngineEnabled()
+    public async Task<bool> GetIsWindowsEngineEnabled(CancellationToken ct = default)
     {
       await new SynchronizationContextRemover();
-      return await this.system.GetIsWindowsEngineEnabled();
+      return await this.system.GetIsWindowsEngineEnabled(ct);
     }
 
     public Task<ContainerListResponse> GetContainer(string id, CancellationToken ct = default)
@@ -120,7 +125,6 @@ namespace DotNet.Testcontainers.Clients
       }
 
       var id = await this.containers.RunAsync(configuration, ct);
-
       this.registryService.Register(id, configuration.CleanUp);
 
       return id;
@@ -129,6 +133,12 @@ namespace DotNet.Testcontainers.Clients
     public async Task<string> BuildAsync(IImageFromDockerfileConfiguration configuration, CancellationToken ct = default)
     {
       return await this.images.BuildAsync(configuration, ct);
+    }
+
+    private void PurgeOrphanedContainers()
+    {
+      var args = new PurgeOrphanedContainersArgs(this.endpoint, this.registryService.GetRegisteredContainers());
+      new Process { StartInfo = { FileName = "docker", Arguments = args.ToString() } }.Start();
     }
   }
 }

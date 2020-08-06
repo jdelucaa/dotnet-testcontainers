@@ -10,7 +10,9 @@ namespace DotNet.Testcontainers.Containers.Modules
   using DotNet.Testcontainers.Containers.Configurations;
   using DotNet.Testcontainers.Containers.WaitStrategies;
   using DotNet.Testcontainers.Internals;
+  using DotNet.Testcontainers.Services;
   using JetBrains.Annotations;
+  using Microsoft.Extensions.Logging;
 
   public class TestcontainersContainer : IDockerContainer
   {
@@ -24,6 +26,12 @@ namespace DotNet.Testcontainers.Containers.Modules
 
     [NotNull]
     private ContainerListResponse container = new ContainerListResponse();
+
+    protected TestcontainersContainer(ITestcontainersConfiguration configuration)
+    {
+      this.client = new TestcontainersClient(configuration.Endpoint);
+      this.configuration = configuration;
+    }
 
     /// <inheritdoc />
     public string Id
@@ -65,6 +73,34 @@ namespace DotNet.Testcontainers.Containers.Modules
       }
     }
 
+    /// <inheritdoc />
+    public string Hostname
+    {
+      get
+      {
+        switch (this.configuration.Endpoint.Scheme)
+        {
+          case "tcp":
+          case "http":
+          case "https":
+            return this.configuration.Endpoint.Host;
+          case "unix":
+          case "npipe":
+            if (this.client.IsRunningInsideDocker)
+            {
+              this.ThrowIfContainerHasNotBeenCreated();
+              return this.container.NetworkSettings.Networks.First().Value.Gateway;
+            }
+            else
+            {
+              return "localhost";
+            }
+          default:
+            return this.IpAddress;
+        }
+      }
+    }
+
     private TestcontainersState State
     {
       get
@@ -80,17 +116,6 @@ namespace DotNet.Testcontainers.Containers.Modules
       }
     }
 
-    protected TestcontainersContainer(ITestcontainersConfiguration configuration)
-    {
-      this.client = new TestcontainersClient(configuration.Endpoint);
-      this.configuration = configuration;
-    }
-
-    ~TestcontainersContainer()
-    {
-      this.Dispose(false);
-    }
-
     public ushort GetMappedPublicPort(int privatePort)
     {
       return this.GetMappedPublicPort($"{privatePort}");
@@ -101,12 +126,6 @@ namespace DotNet.Testcontainers.Containers.Modules
       this.ThrowIfContainerHasNotBeenCreated();
       var mappedPort = this.container.Ports.FirstOrDefault(port => $"{port.PrivatePort}".Equals(privatePort));
       return mappedPort?.PublicPort ?? ushort.MinValue;
-    }
-
-    public void Dispose()
-    {
-      this.Dispose(true);
-      GC.SuppressFinalize(this);
     }
 
     public async Task<long> GetExitCode(CancellationToken ct = default)
@@ -185,6 +204,21 @@ namespace DotNet.Testcontainers.Containers.Modules
       }
     }
 
+    public virtual async ValueTask DisposeAsync()
+    {
+      await new SynchronizationContextRemover();
+
+      if (!ContainerHasBeenCreatedStates.Contains(this.State))
+      {
+        return;
+      }
+
+      var cleanOrStopTask = this.configuration.CleanUp ? this.CleanUpAsync() : this.StopAsync();
+      await cleanOrStopTask;
+
+      this.semaphoreSlim.Dispose();
+    }
+
     private async Task<ContainerListResponse> Create(CancellationToken ct = default)
     {
       if (ContainerHasBeenCreatedStates.Contains(this.State))
@@ -200,13 +234,19 @@ namespace DotNet.Testcontainers.Containers.Modules
     {
       using (var cts = new CancellationTokenSource())
       {
-        var attachOutputConsumerTask = this.client.AttachAsync(id, this.configuration.OutputConsumer, cts.Token);
+        await this.client.AttachAsync(id, this.configuration.OutputConsumer, cts.Token);
 
         var startTask = this.client.StartAsync(id, cts.Token);
 
-        var waitTask = WaitStrategy.WaitUntil(() => this.configuration.WaitStrategy.Until(this.configuration.Endpoint, id), ct: cts.Token);
+        var waitTask = Task.Run(async () =>
+        {
+          foreach (var waitStrategy in this.configuration.WaitStrategies)
+          {
+            await WaitStrategy.WaitUntil(() => waitStrategy.Until(this.configuration.Endpoint, id), ct: cts.Token);
+          }
+        }, cts.Token);
 
-        var tasks = Task.WhenAll(attachOutputConsumerTask, startTask, waitTask);
+        var tasks = Task.WhenAll(startTask, waitTask);
 
         try
         {
@@ -214,8 +254,10 @@ namespace DotNet.Testcontainers.Containers.Modules
         }
         catch (Exception)
         {
+          // Get all thrown exceptions in tasks.
           if (tasks.Exception != null)
           {
+            TestcontainersHostService.GetLogger<TestcontainersContainer>().LogError(tasks.Exception, "Can not start container {id}", id);
             throw tasks.Exception;
           }
         }
@@ -238,17 +280,6 @@ namespace DotNet.Testcontainers.Containers.Modules
     {
       await this.client.RemoveAsync(id, ct);
       return new ContainerListResponse();
-    }
-
-    protected void Dispose(bool disposing)
-    {
-      if (!ContainerHasBeenCreatedStates.Contains(this.State))
-      {
-        return;
-      }
-
-      var cleanOrStopTask = this.configuration.CleanUp ? this.CleanUpAsync() : this.StopAsync();
-      cleanOrStopTask.GetAwaiter().GetResult();
     }
 
     private void ThrowIfContainerHasNotBeenCreated()

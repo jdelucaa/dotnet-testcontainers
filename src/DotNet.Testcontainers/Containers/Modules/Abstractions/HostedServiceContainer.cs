@@ -13,8 +13,6 @@ namespace DotNet.Testcontainers.Containers.Modules.Abstractions
 
     public virtual int Port { get; set; }
 
-    public virtual string Hostname { get; set; }
-
     public virtual string Username { get; set; }
 
     public virtual string Password { get; set; }

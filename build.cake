@@ -1,10 +1,10 @@
-#tool nuget:?package=MSBuild.SonarQube.Runner.Tool&version=4.6.0
+#tool nuget:?package=MSBuild.SonarQube.Runner.Tool&version=4.8.0
 
-#addin nuget:?package=Cake.Sonar&version=1.1.22
+#addin nuget:?package=Cake.Sonar&version=1.1.25
 
-#addin nuget:?package=Cake.Git&version=0.21.0
+#addin nuget:?package=Cake.Git&version=0.22.0
 
-#load "./build/parameters.cake"
+#load ".cake-scripts/parameters.cake"
 
 readonly var param = BuildParameters.Instance(Context, "DotNet.Testcontainers");
 
@@ -20,7 +20,7 @@ Setup(context =>
     toClean.Add(project.Path.GetDirectory().Combine("Debug"));
   }
 
-  Information("Building version {0} of .NET Testcontainers ({1})", param.Version, param.Branch);
+  Information("Building version {0} of .NET Testcontainers ({1}@{2})", param.Version, param.Branch, param.Sha);
 });
 
 Teardown(context =>
@@ -68,11 +68,13 @@ Task("Build")
   {
     Configuration = param.Configuration,
     Verbosity = param.Verbosity,
-    NoRestore = true
+    NoRestore = true,
+    ArgumentCustomization = args => args
+      .Append($"/p:TreatWarningsAsErrors={param.IsReleaseBuild.ToString()}")
   });
 });
 
-Task("Test")
+Task("Tests")
   .Does(() =>
 {
   foreach(var testProject in param.Projects.OnlyTests)
@@ -95,7 +97,6 @@ Task("Test")
 });
 
 Task("Sonar-Begin")
-  .WithCriteria(() => param.ShouldPublish)
   .Does(() =>
 {
   SonarBegin(new SonarBeginSettings
@@ -104,15 +105,21 @@ Task("Sonar-Begin")
     Key = param.SonarQubeCredentials.Key,
     Login = param.SonarQubeCredentials.Token,
     Organization = param.SonarQubeCredentials.Organization,
-    Branch = param.Branch,
+    Branch = param.IsPullRequest ? null : param.Branch, // A pull request analysis can not have the branch analysis parameter 'sonar.branch.name'.
     Silent = true,
+    Version = param.Version.Substring(5),
+    PullRequestProvider = "GitHub",
+    PullRequestGithubEndpoint = "https://api.github.com/",
+    PullRequestGithubRepository = "HofmeisterAn/dotnet-testcontainers",
+    PullRequestKey = System.Int32.TryParse(param.PullRequestId, out var id) ? id : (int?)null,
+    PullRequestBranch = param.SourceBranch,
+    PullRequestBase = param.TargetBranch,
     VsTestReportsPath = $"{MakeAbsolute(param.Paths.Directories.TestResults)}/*.trx",
-    OpenCoverReportsPath = $"{MakeAbsolute(param.Paths.Directories.TestCoverage)}/coverage.opencover.xml"
+    OpenCoverReportsPath = $"{MakeAbsolute(param.Paths.Directories.TestCoverage)}/*.opencover.xml"
   });
 });
 
 Task("Sonar-End")
-  .WithCriteria(() => param.ShouldPublish)
   .Does(() =>
 {
   SonarEnd(new SonarEndSettings
@@ -122,6 +129,7 @@ Task("Sonar-End")
 });
 
 Task("Create-NuGet-Packages")
+  .WithCriteria(() => param.ShouldPublish)
   .Does(() =>
 {
   DotNetCorePack(param.Projects.Testcontainers.Path.FullPath, new DotNetCorePackSettings
@@ -144,9 +152,8 @@ Task("Publish-NuGet-Packages")
 {
   foreach(var package in GetFiles($"{param.Paths.Directories.NugetRoot}/*.(nupkg|snupkgs)"))
   {
-    NuGetPush(package, new NuGetPushSettings
+    DotNetCoreNuGetPush(package.FullPath, new DotNetCoreNuGetPushSettings
     {
-      ToolPath = "./tools/nuget.exe",
       Source = param.NuGetCredentials.Source,
       ApiKey = param.NuGetCredentials.ApiKey
     });
@@ -157,14 +164,14 @@ Task("Default")
   .IsDependentOn("Clean")
   .IsDependentOn("Restore-NuGet-Packages")
   .IsDependentOn("Build")
-  .IsDependentOn("Test");
+  .IsDependentOn("Tests");
 
 Task("Sonar")
   .IsDependentOn("Clean")
   .IsDependentOn("Restore-NuGet-Packages")
   .IsDependentOn("Sonar-Begin")
   .IsDependentOn("Build")
-  .IsDependentOn("Test")
+  .IsDependentOn("Tests")
   .IsDependentOn("Sonar-End");
 
 Task("Publish")
